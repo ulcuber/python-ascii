@@ -1,1 +1,11 @@
 __pycache__
+
+.env
+
+# venv
+/bin
+/include
+/lib
+/lib64
+/share
+pyvenv.cfg

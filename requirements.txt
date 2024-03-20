@@ -1,0 +1,4 @@
+Pillow
+ruff
+numpy
+opencv-python
