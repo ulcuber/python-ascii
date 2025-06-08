@@ -9,24 +9,45 @@ import numpy as np
 from grayscale import Grayscale
 from rgba import RGBA
 
+
 def get_args():
     size = shutil.get_terminal_size((80, 20))
 
-    parser = argparse.ArgumentParser(description='Image to ASCII converter')
+    parser = argparse.ArgumentParser(description="Image to ASCII converter")
 
-    parser.add_argument('--max_width', type=int, default=size.columns,
-                    help='Maximum width to resize bigger image to in symbols. Default to COLUMNS')
-    parser.add_argument('--force_width', type=int,
-                    help='Width to resize image to in symbols even if image is smaller. Default to image width or COLUMNS')
-    parser.add_argument('--max_height', type=int, default=size.lines,
-                    help='Maximum height to resize bigger image to in symbols. Default to LINES')
-    parser.add_argument('--video', type=str, default=0,
-                    help='Path to video. Default to webcam')
-    parser.add_argument('--converter', type=str, default='grayscale',
-                        choices=['grayscale', 'rgba', '4blackwhite'],
-                        help='Converter to use. One of: grayscale (default), rgba, 4blackwhite (x4 resolution)')
+    parser.add_argument(
+        "--max_width",
+        type=int,
+        default=size.columns,
+        help="Maximum width to resize bigger image to in symbols. Default to COLUMNS",
+    )
+    parser.add_argument(
+        "--force_width",
+        type=int,
+        help="Width to resize image to in symbols even if image is smaller. Default to image width or COLUMNS",
+    )
+    parser.add_argument(
+        "--max_height",
+        type=int,
+        default=size.lines,
+        help="Maximum height to resize bigger image to in symbols. Default to LINES",
+    )
+    parser.add_argument(
+        "--video", type=str, default=0, help="Path to video. Default to webcam"
+    )
+    parser.add_argument(
+        "--converter",
+        type=str,
+        default="grayscale",
+        choices=["grayscale", "rgba", "4blackwhite"],
+        help="Converter to use. One of: grayscale (default), rgba, 4blackwhite (x4 resolution)",
+    )
+
+    parser.add_argument("--fps", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--drop-frames", action=argparse.BooleanOptionalAction, help="Can add more lag")
 
     return parser.parse_args()
+
 
 def main():
     args = get_args()
@@ -37,43 +58,62 @@ def main():
     max_height = args.max_height
     converter = args.converter
 
-    if converter == 'grayscale':
-        driver = Grayscale(max_width=max_width, max_height=max_height, force_width=force_width)
-    elif converter == '4blackwhite':
-        driver = BlackWhite(max_width=max_width, max_height=max_height, force_width=force_width)
-    elif converter == 'rgba':
-        driver = RGBA(max_width=max_width, max_height=max_height, force_width=force_width)
+    if converter == "grayscale":
+        driver = Grayscale(
+            max_width=max_width, max_height=max_height, force_width=force_width
+        )
+    elif converter == "4blackwhite":
+        driver = BlackWhite(
+            max_width=max_width, max_height=max_height, force_width=force_width
+        )
+    elif converter == "rgba":
+        driver = RGBA(
+            max_width=max_width,
+            max_height=max_height,
+            force_width=force_width,
+            type=RGBA.TYPE_BGR,
+        )
     else:
-        raise Exception('Unsupported Converter')
+        raise Exception("Unsupported Converter")
 
     cap = cv2.VideoCapture(video)
     video_fps = cap.get(cv2.CAP_PROP_FPS)
-    if video == 0:
-        def drop_frames(count: float):
-            pass
-    else:
+
+    def drop_frames(count: float):
+        pass
+
+    if args.drop_frames and video is not int:
+
         def drop_frames(count: float):
             current = cap.get(cv2.CAP_PROP_POS_FRAMES)
             cap.set(cv2.CAP_PROP_POS_FRAMES, current + count)
 
     if not cap.isOpened():
-        print('Cannot open capture')
+        print("Cannot open capture")
         exit(1)
 
     if video == 0:
         driver.mirror = True
 
+    if not sys.stdout.isatty():
+        print("stdout is not a TTY")
+        exit(1)
+
+    # Hide cursor
+    sys.stdout.write("\033[?25l")
     CUP = "\033[%d;%dH"
 
     video_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
     width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
     height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-    width, height = driver.resize(int(width), int(height))
+    frame_width, frame_height = driver.resize(int(width), int(height))
 
     nano = 1_000_000_000
-    per_frame = int(nano / video_fps)
+    # per_frame = int(nano / video_fps)
+    per_frame = int(nano / 600)
 
     elapsed = 0
+    elapsed_frame = 0
     elapsed_real = 0
     elapsed_total = 0
     elapsed_frames = -1
@@ -98,26 +138,29 @@ def main():
             elapsed_total -= nano
             fps = elapsed_frames
             elapsed_frames = 0
-            info = f"FPS: {fps}/{video_fps}, ({elapsed}/{per_frame})ns, frames: {total_frames}/{video_frames} -{dropped_frames}"
+            if args.fps:
+                info = f"FPS: {fps}/{video_fps}, {elapsed_frame * 100 / per_frame:.0f}% ({elapsed_frame}/{per_frame}/{elapsed})ns, frames: {total_frames}/{video_frames} -{dropped_frames}"
 
         ret, frame = cap.read()
         if not ret:
             print("Can't receive frame (stream end?). Exiting ...")
             break
 
-        text = driver.cv2(frame, width, height)
+        text = driver.cv2(frame, frame_width, frame_height)
 
         sys.stdout.write(CUP % (0, 0))
-        sys.stdout.write(text)
+        # sys.stdout.write(text)
+        sys.stdout.buffer.write(text.encode("utf-8"))
 
-        if info:
+        if info and args.fps:
             sys.stdout.write(CUP % (0, 0))
             sys.stdout.write(info)
 
         sys.stdout.flush()
 
-        now = time.time_ns()
         total_frames += 1
+        now = time.time_ns()
+        elapsed_frame = now - prev
         elapsed_real = now - start
         remainder = (total_frames * per_frame - elapsed_real) / nano
         if remainder > 0:
@@ -133,6 +176,9 @@ def main():
 
     cap.release()
     cv2.destroyAllWindows()
+
+    sys.stdout.write("\033[?25h")
+
 
 if __name__ == "__main__":
     main()

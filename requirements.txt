@@ -1,4 +1,4 @@
 Pillow
 ruff
 numpy
-opencv-python
+opencv-python-headless

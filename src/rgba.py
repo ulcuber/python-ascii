@@ -1,47 +1,50 @@
 from typing import NewType, Tuple
-from PIL import Image
 import numpy as np
 import cv2
 
 RGBAPixel = NewType("RGBAPixel", Tuple[int, int, int, int])
 RGBPixel = NewType("RGBPixel", Tuple[int, int, int])
+BGRPixel = NewType("BGRPixel", Tuple[int, int, int])
 
 
 class RGBA:
     # CHARACTERS = ('█', '▓', '▒', '░', '●', '•', '◦', '∘', '·', ' ')
-    CHARACTERS = (' ', '·', '∘', '◦', '•', '●', '░', '▒', '▓', '█')
+    CHARACTERS = (" ", "·", "∘", "◦", "•", "●", "░", "▒", "▓", "█")
     SYMBOL_RATIO = 0.42
     ALPHA_THRESHOLD = 10
 
     RGB_FOREGROUND = "\033[38;2;%d;%d;%dm"
     RESET = "\033[0m"
 
-    def __init__(self, max_width=80, max_height: int = 20, force_width=None, mirror: bool = False) -> None:
+    TYPE_RGB = 0
+    TYPE_BGR = 1
+
+    def __init__(
+        self,
+        max_width=80,
+        max_height: int = 20,
+        force_width=None,
+        mirror: bool = False,
+        type=None,
+    ) -> None:
         self.max_width = max_width
         self.max_height = max_height
         self.force_width = force_width
         self.mirror = mirror
 
-        self.image_string = ''
+        self.image_string = ""
 
         self.chars_count = len(self.CHARACTERS)
 
-    def pil(self, image: Image.Image):
-        width, height = image.size
-
-        image = image.resize(self.resize(width, height))
-
-        width, height = image.size
-
-        if self.mirror:
-            image = image.transpose(Image.FLIP_LEFT_RIGHT)
-
-        pixels = tuple(image.getdata())
-
-        return self.pixels(pixels, width, height)
+        if type == None:
+            self.type = self.TYPE_RGB
+        else:
+            self.type = type
 
     def cv2(self, frame: np.ndarray, width, height):
-        resized_frame: np.ndarray = cv2.resize(frame, (width, height), interpolation=cv2.INTER_LINEAR)
+        resized_frame: np.ndarray = cv2.resize(
+            frame, (width, height), interpolation=cv2.INTER_LINEAR
+        )
 
         if self.mirror:
             resized_frame = cv2.flip(resized_frame, 1)
@@ -60,24 +63,33 @@ class RGBA:
 
         return new_width, new_height
 
-    def pixels(self, pixels: tuple|np.ndarray, width: int, height: int) -> str:
-        self.image_string = ''
+    def pixels(self, pixels: np.ndarray, width: int, height: int) -> str:
+        self.image_string = ""
 
         pixel_len = len(pixels[0])
         self.max_channel_values = 255 * pixel_len
 
         if pixel_len == 3:
             char = self.CHARACTERS[self.chars_count - 1]
-            def map_char(pixel: RGBPixel):
-                return (self.RGB_FOREGROUND % pixel) + char
+            if self.type == self.TYPE_BGR:
+
+                def map_char(pixel: BGRPixel):
+                    b, g, r = pixel
+                    return (self.RGB_FOREGROUND % (r, g, b)) + char
+            else:
+
+                def map_char(pixel: RGBPixel):
+                    return (self.RGB_FOREGROUND % tuple(pixel)) + char
         elif pixel_len == 4:
+
             def map_char(pixel: RGBAPixel):
                 r, g, b, alpha = pixel
                 char = self.map_alpha_to_character(alpha)
                 if alpha <= self.ALPHA_THRESHOLD:
-                    return self.RESET + ' '
+                    return self.RESET + " "
                 return (self.RGB_FOREGROUND % (r, g, b)) + char
         else:
+
             def map_char(pixel):
                 return str(pixel)
 
@@ -91,7 +103,7 @@ class RGBA:
         return self.image_string
 
     def rows(self, rows: np.ndarray) -> str:
-        self.image_string = ''
+        self.image_string = ""
 
         row = rows[0]
         pixel = row[0]
@@ -100,16 +112,25 @@ class RGBA:
 
         if pixel_len == 3:
             char = self.CHARACTERS[self.chars_count - 1]
-            def map_char(pixel: RGBPixel):
-                return (self.RGB_FOREGROUND % tuple(pixel)) + char
+            if self.type == self.TYPE_BGR:
+
+                def map_char(pixel: BGRPixel):
+                    b, g, r = pixel
+                    return (self.RGB_FOREGROUND % (r, g, b)) + char
+            else:
+
+                def map_char(pixel: RGBPixel):
+                    return (self.RGB_FOREGROUND % tuple(pixel)) + char
         elif pixel_len == 4:
+
             def map_char(pixel: RGBAPixel):
                 r, g, b, alpha = tuple(pixel)
                 char = self.map_alpha_to_character(alpha)
                 if alpha <= self.ALPHA_THRESHOLD:
-                    return self.RESET + ' '
+                    return self.RESET + " "
                 return (self.RGB_FOREGROUND % (r, g, b)) + char
         else:
+
             def map_char(pixel):
                 return str(pixel)
 
