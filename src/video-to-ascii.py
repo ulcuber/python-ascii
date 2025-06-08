@@ -45,6 +45,7 @@ def get_args():
 
     parser.add_argument("--fps", action=argparse.BooleanOptionalAction)
     parser.add_argument("--drop-frames", action=argparse.BooleanOptionalAction, help="Can add more lag")
+    parser.add_argument("--bytes", action=argparse.BooleanOptionalAction, help="Can add more lag")
 
     return parser.parse_args()
 
@@ -64,7 +65,7 @@ def main():
         )
     elif converter == "4blackwhite":
         driver = BlackWhite(
-            max_width=max_width, max_height=max_height, force_width=force_width
+            max_width=max_width, max_height=max_height, force_width=force_width, as_bytes=args.bytes
         )
     elif converter == "rgba":
         driver = RGBA(
@@ -149,8 +150,11 @@ def main():
         text = driver.cv2(frame, frame_width, frame_height)
 
         sys.stdout.write(CUP % (0, 0))
-        # sys.stdout.write(text)
-        sys.stdout.buffer.write(text.encode("utf-8"))
+
+        if args.bytes:
+            sys.stdout.buffer.write(text)
+        else:
+            sys.stdout.write(text)
 
         if info and args.fps:
             sys.stdout.write(CUP % (0, 0))

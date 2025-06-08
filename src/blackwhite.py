@@ -31,15 +31,25 @@ class BlackWhite:
         max_height: int = 20,
         force_width: int | None = None,
         mirror: bool = False,
+        as_bytes: bool = False,
     ) -> None:
         self.max_width = max_width
         self.max_height = max_height
         self.force_width = force_width
         self.mirror = mirror
 
-        self.CHAR_LUT = np.array(
-            [self.CHARACTERS.get(i, " ") for i in range(0x1112)], dtype="<U1"
-        )
+        self.as_bytes = as_bytes
+        if self.as_bytes:
+            self.dtype = '|S4'
+            self.CHAR_LUT = np.array([
+                self.CHARACTERS.get(i, " ").encode('utf-8')  # Store as bytes
+                for i in range(0x1112)
+            ], dtype=self.dtype)  # '|S4' = up to 4-byte sequences (covers most Unicode)
+        else:
+            self.dtype = '<U1'
+            self.CHAR_LUT = np.array(
+                [self.CHARACTERS.get(i, " ") for i in range(0x1112)], dtype=self.dtype
+            )
 
         self.resize(max_width, max_height)
 
@@ -60,7 +70,7 @@ class BlackWhite:
 
         self.rows = new_height // 2
         self.buffer_size = self.rows * (self.cols + 1)
-        self.frame = np.full(self.buffer_size, "\n", dtype="<U1")
+        self.frame = np.full(self.buffer_size, "\n", dtype=self.dtype)
 
         self.output_positions = (
             np.arange(self.rows)[:, None] * (self.cols + 1)  # +1 for newline
@@ -83,6 +93,10 @@ class BlackWhite:
 
         self.pixels(gray_frame)
 
+        if self.as_bytes:
+            # Convert the entire frame to bytes in one shot
+            return self.frame.view('|S1').tobytes()
+
         # see np.ndarray(N) as np.ndarray(1) with long string without copying
         return self.frame.view(f"U{len(self.frame)}")[0]
 
@@ -95,7 +109,5 @@ class BlackWhite:
             | (thresholded[1::2, ::2] << 4)  # 0x0010
             | thresholded[1::2, 1::2]  # 0x0001
         ).astype(np.uint16)
-
-        valid_positions = self.output_positions[: block_keys.size]
 
         self.frame[self.output_positions] = self.CHAR_LUT[block_keys.ravel()]
