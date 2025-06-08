@@ -2,10 +2,14 @@ import argparse
 import shutil
 import sys
 import time
-from blackwhite import BlackWhite
+
+import threading
+from queue import Queue
+
 import cv2
 import numpy as np
 
+from blackwhite import BlackWhite
 from grayscale import Grayscale
 from rgba import RGBA
 
@@ -52,6 +56,8 @@ def get_args():
 
 def main():
     args = get_args()
+
+    frame_queue = Queue(maxsize=60)
 
     video = args.video
     force_width = args.force_width
@@ -104,14 +110,37 @@ def main():
     sys.stdout.write("\033[?25l")
     CUP = "\033[%d;%dH"
 
+    if args.bytes:
+        def write_frame(frame):
+            sys.stdout.buffer.write(frame)
+    else:
+        def write_frame(frame):
+            sys.stdout.write(frame)
+
     video_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
     width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
     height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
     frame_width, frame_height = driver.resize(int(width), int(height))
 
+    info = None
+
+    def process_frames():
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                frame_queue.put(None)  # Signal end of stream
+                break
+
+            # Process frame and put result in queue
+            processed = driver.cv2(frame, frame_width, frame_height)
+            frame_queue.put(processed)
+
+    processor = threading.Thread(target=process_frames)
+
+    processor.start()
+
     nano = 1_000_000_000
-    # per_frame = int(nano / video_fps)
-    per_frame = int(nano / 600)
+    per_frame = int(nano / video_fps)
 
     elapsed = 0
     elapsed_frame = 0
@@ -122,13 +151,12 @@ def main():
     real_frames = 0
     dropped_frames = 0
     fps = 0
-    info = None
     ret = None
     frame = None
 
     start = time.time_ns()
     prev = start
-    while cap.isOpened():
+    while processor.is_alive():
         now = time.time_ns()
         elapsed = now - prev
         prev = now
@@ -142,19 +170,12 @@ def main():
             if args.fps:
                 info = f"FPS: {fps}/{video_fps}, {elapsed_frame * 100 / per_frame:.0f}% ({elapsed_frame}/{per_frame}/{elapsed})ns, frames: {total_frames}/{video_frames} -{dropped_frames}"
 
-        ret, frame = cap.read()
-        if not ret:
-            print("Can't receive frame (stream end?). Exiting ...")
+        frame_data = frame_queue.get()
+        if frame_data is None:  # End signal
             break
 
-        text = driver.cv2(frame, frame_width, frame_height)
-
         sys.stdout.write(CUP % (0, 0))
-
-        if args.bytes:
-            sys.stdout.buffer.write(text)
-        else:
-            sys.stdout.write(text)
+        write_frame(frame_data)
 
         if info and args.fps:
             sys.stdout.write(CUP % (0, 0))
@@ -169,7 +190,7 @@ def main():
         remainder = (total_frames * per_frame - elapsed_real) / nano
         if remainder > 0:
             time.sleep(remainder)
-        elif remainder < 0:
+        elif remainder < -0.1:
             elapsed_real = time.time_ns() - start
             real_frames = round(elapsed_real / per_frame)
             frame_lag = real_frames - total_frames
